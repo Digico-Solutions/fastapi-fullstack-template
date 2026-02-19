@@ -1,0 +1,21 @@
+# =============================================================================
+# GitHub Actions OIDC for ECR - Example Configuration
+# =============================================================================
+# Copy this file to terraform.tfvars and update with your values
+# =============================================================================
+
+# AWS region where resources will be created
+aws_region = "us-east-1"
+
+# GitHub organization name (e.g., "my-org" from github.com/my-org/my-repo)
+github_org = "your-github-org"
+
+# GitHub repository name (e.g., "my-repo" from github.com/my-org/my-repo)
+github_repo = "your-repo-name"
+
+# ECR repository names (must already exist in AWS)
+ecr_repository_backend  = "your-app-backend"
+ecr_repository_frontend = "your-app-frontend"
+
+# (Optional) Custom IAM role name - defaults to "github-actions-ecr-role"
+# role_name = "github-actions-ecr-role"
