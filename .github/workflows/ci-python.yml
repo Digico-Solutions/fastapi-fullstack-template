@@ -22,11 +22,8 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Install dependencies
-        run: uv pip install ruff --system
-
       - name: Run linting
-        run: make lint
+        run: uvx ruff check . --output-format=github
 
   security:
     name: Security (semgrep)
@@ -39,8 +36,5 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Install dependencies
-        run: uv pip install semgrep --system
-
       - name: Run security scan
-        run: make security
+        run: uvx semgrep --config auto --error --severity WARNING .
