@@ -1,16 +1,16 @@
 name: Build and Push to ECR
 
 on:
-  push:
-    branches:
-      - master
-      - main
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - '.github/workflows/ecr-push.yml'
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'Target environment'
+        type: choice
+        required: true
+        options:
+          - dev
+          - staging
+          - production
       build_backend:
         description: 'Build backend image'
         type: boolean
@@ -24,37 +24,48 @@ permissions:
   id-token: write
   contents: read
 
-env:
-  AWS_REGION: ${{ vars.AWS_REGION }}
-  ECR_REPOSITORY_BACKEND: ${{ vars.ECR_REPOSITORY_BACKEND }}
-  ECR_REPOSITORY_FRONTEND: ${{ vars.ECR_REPOSITORY_FRONTEND }}
-
 jobs:
-  detect-changes:
+  set-environment:
     runs-on: ubuntu-latest
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
-      frontend: ${{ steps.filter.outputs.frontend }}
+      aws_region: ${{ steps.mapper.outputs.aws_region }}
+      aws_role_arn: ${{ steps.mapper.outputs.aws_role_arn }}
+      ecr_repository_backend: ${{ steps.mapper.outputs.ecr_repository_backend }}
+      ecr_repository_frontend: ${{ steps.mapper.outputs.ecr_repository_frontend }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Detect changed paths
-        uses: dorny/paths-filter@v3
-        id: filter
+      - name: Set environment variables
+        id: mapper
+        uses: kanga333/variable-mapper@master
         with:
-          filters: |
-            backend:
-              - 'backend/**'
-            frontend:
-              - 'frontend/**'
+          key: "${{ inputs.environment }}"
+          map: |
+            {
+              "dev": {
+                "aws_region": "eu-west-1",
+                "aws_role_arn": "${{ secrets.AWS_ROLE_ARN_DEV }}",
+                "ecr_repository_backend": "fastapi-backend-dev",
+                "ecr_repository_frontend": "fastapi-frontend-dev"
+              },
+              "staging": {
+                "aws_region": "eu-west-1",
+                "aws_role_arn": "${{ secrets.AWS_ROLE_ARN_STAGING }}",
+                "ecr_repository_backend": "fastapi-backend-staging",
+                "ecr_repository_frontend": "fastapi-frontend-staging"
+              },
+              "production": {
+                "aws_region": "eu-west-1",
+                "aws_role_arn": "${{ secrets.AWS_ROLE_ARN_PRODUCTION }}",
+                "ecr_repository_backend": "fastapi-backend-production",
+                "ecr_repository_frontend": "fastapi-frontend-production"
+              }
+            }
 
   build-backend:
-    needs: detect-changes
-    if: |
-      (github.event_name == 'push' && needs.detect-changes.outputs.backend == 'true') ||
-      (github.event_name == 'workflow_dispatch' && inputs.build_backend)
+    needs: set-environment
+    if: inputs.build_backend
     runs-on: ubuntu-latest
+    outputs:
+      image_digest: ${{ steps.push.outputs.digest }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -62,32 +73,40 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ needs.set-environment.outputs.aws_role_arn }}
+          aws-region: ${{ needs.set-environment.outputs.aws_region }}
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build, tag, and push backend image
+        id: push
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ needs.set-environment.outputs.ecr_repository_backend }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG -f backend/Dockerfile backend/
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f backend/Dockerfile backend/
           
-          docker tag $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:latest
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:latest
+          # Push with commit SHA tag and capture digest
+          DIGEST=$(docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG --quiet)
+          echo "digest=$DIGEST" >> $GITHUB_OUTPUT
           
-          echo "Backend image pushed: $ECR_REGISTRY/$ECR_REPOSITORY_BACKEND:$IMAGE_TAG"
+          # Also tag and push as latest
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          echo "### Backend Image Pushed :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_STEP_SUMMARY
+          echo "- **Digest:** $DIGEST" >> $GITHUB_STEP_SUMMARY
 
   build-frontend:
-    needs: detect-changes
-    if: |
-      (github.event_name == 'push' && needs.detect-changes.outputs.frontend == 'true') ||
-      (github.event_name == 'workflow_dispatch' && inputs.build_frontend)
+    needs: set-environment
+    if: inputs.build_frontend
     runs-on: ubuntu-latest
+    outputs:
+      image_digest: ${{ steps.push.outputs.digest }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -95,22 +114,30 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ needs.set-environment.outputs.aws_role_arn }}
+          aws-region: ${{ needs.set-environment.outputs.aws_region }}
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build, tag, and push frontend image
+        id: push
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ needs.set-environment.outputs.ecr_repository_frontend }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG -f frontend/Dockerfile frontend/
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f frontend/Dockerfile frontend/
           
-          docker tag $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:latest
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:latest
+          # Push with commit SHA tag and capture digest
+          DIGEST=$(docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG --quiet)
+          echo "digest=$DIGEST" >> $GITHUB_OUTPUT
           
-          echo "Frontend image pushed: $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG"
+          # Also tag and push as latest
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          echo "### Frontend Image Pushed :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_STEP_SUMMARY
+          echo "- **Digest:** $DIGEST" >> $GITHUB_STEP_SUMMARY
