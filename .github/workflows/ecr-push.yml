@@ -93,10 +93,6 @@ jobs:
           DIGEST=$(docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG --quiet)
           echo "digest=$DIGEST" >> $GITHUB_OUTPUT
           
-          # Also tag and push as latest
-          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          
           echo "### Backend Image Pushed :rocket:" >> $GITHUB_STEP_SUMMARY
           echo "- **Image:** $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_STEP_SUMMARY
           echo "- **Digest:** $DIGEST" >> $GITHUB_STEP_SUMMARY
@@ -133,10 +129,6 @@ jobs:
           # Push with commit SHA tag and capture digest
           DIGEST=$(docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG --quiet)
           echo "digest=$DIGEST" >> $GITHUB_OUTPUT
-          
-          # Also tag and push as latest
-          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           
           echo "### Frontend Image Pushed :rocket:" >> $GITHUB_STEP_SUMMARY
           echo "- **Image:** $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_STEP_SUMMARY
